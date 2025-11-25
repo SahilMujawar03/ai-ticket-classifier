@@ -4,6 +4,9 @@ import streamlit as st
 import joblib
 import datetime
 
+from streamlit_lottie import st_lottie   # 🔹 NEW: for animation
+import requests                          # 🔹 NEW: to load animation JSON
+
 # ----------------- BASIC CONFIG -----------------
 st.set_page_config(
     page_title="AI Ticket Classifier",
@@ -46,6 +49,25 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
+# ----------------- ANIMATION UTILS -----------------
+def load_lottie(url: str):
+    """Load a Lottie animation from a URL."""
+    try:
+        r = requests.get(url)
+        if r.status_code != 200:
+            return None
+        return r.json()
+    except Exception:
+        return None
+
+# Load an AI-themed animation
+lottie_url = "https://assets2.lottiefiles.com/packages/lf20_kyu7xb1v.json"
+lottie_ai = load_lottie(lottie_url)
+
+# Display animation below the title
+if lottie_ai:
+    st_lottie(lottie_ai, height=230, key="aiAnimation")
+
 # ----------------- LOAD ARTIFACTS -----------------
 @st.cache_resource
 def load_artifacts():
@@ -58,7 +80,6 @@ model, vectorizer = load_artifacts()
 
 # ----------------- UTILS -----------------
 ADMIN_PASSWORD = st.secrets.get("ADMIN_PASSWORD", "admin123")
-st.sidebar.write("DEBUG: Loaded password =", ADMIN_PASSWORD)
 
 def simple_summary(text: str, max_words: int = 18) -> str:
     """Very simple 'AI-style' summary: first N words."""
