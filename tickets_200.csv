@@ -1,0 +1,201 @@
+ticket,category
+User cannot login to Active Directory,Active Directory Issue
+Password reset required for user,Active Directory Issue
+Account locked out from AD,Active Directory Issue
+AD group membership not updating,Active Directory Issue
+User unable to access shared drive,Active Directory Issue
+AD replication failure in domain,Active Directory Issue
+Cannot connect to WiFi network,Network Issue
+LAN cable unplugged error,Network Issue
+Internet very slow in office,Network Issue
+Network switch port down,Network Issue
+VPN keeps disconnecting,Network Issue
+Unable to access internal website,Network Issue
+Firewall is blocking VPN traffic,Firewall Issue
+Port needs to be opened on firewall,Firewall Issue
+Firewall policy update request,Firewall Issue
+Blocked IP detected on firewall,Firewall Issue
+Firewall dropping packets randomly,Firewall Issue
+Email not syncing in Outlook,Email Issue
+Outlook search not working,Email Issue
+Cannot send emails externally,Email Issue
+Shared mailbox not accessible,Email Issue
+Outlook keeps crashing on startup,Email Issue
+Email stuck in Outbox,Email Issue
+Laptop running very slow,Hardware Issue
+Laptop screen flickering,Hardware Issue
+Keyboard not working,Hardware Issue
+Mouse not detected,Hardware Issue
+PC keeps shutting down,Hardware Issue
+Unable to connect monitor,Hardware Issue
+High CPU usage on Windows server,Server Issue
+Server restart required due to OS update,Server Issue
+Unable to RDP into server,Server Issue
+Disk space critically low on server,Server Issue
+Windows service not starting,Server Issue
+Server backup failed overnight,Server Issue
+MDM device not syncing,MDM Issue
+Mobile device not enrolled,MDM Issue
+Device shows as non-compliant,MDM Issue
+MDM push notifications failing,MDM Issue
+Unable to deploy app via MDM,MDM Issue
+Antivirus alert: malware detected,Security Issue
+Security scan showing vulnerabilities,Security Issue
+Antivirus definitions outdated,Security Issue
+Unauthorized login attempt detected,Security Issue
+Suspicious network activity alert,Security Issue
+Printer not connecting to network,Printer Issue
+Printer queue stuck,Printer Issue
+Cannot print in color,Printer Issue
+Printer keeps going offline,Printer Issue
+Scanner not working,Printer Issue
+User cannot login to Active Directory,Active Directory Issue
+Password reset required for user,Active Directory Issue
+Account locked out from AD,Active Directory Issue
+AD group membership not updating,Active Directory Issue
+User unable to access shared drive,Active Directory Issue
+AD replication failure in domain,Active Directory Issue
+Cannot connect to WiFi network,Network Issue
+LAN cable unplugged error,Network Issue
+Internet very slow in office,Network Issue
+Network switch port down,Network Issue
+VPN keeps disconnecting,Network Issue
+Unable to access internal website,Network Issue
+Firewall is blocking VPN traffic,Firewall Issue
+Port needs to be opened on firewall,Firewall Issue
+Firewall policy update request,Firewall Issue
+Blocked IP detected on firewall,Firewall Issue
+Firewall dropping packets randomly,Firewall Issue
+Email not syncing in Outlook,Email Issue
+Outlook search not working,Email Issue
+Cannot send emails externally,Email Issue
+Shared mailbox not accessible,Email Issue
+Outlook keeps crashing on startup,Email Issue
+Email stuck in Outbox,Email Issue
+Laptop running very slow,Hardware Issue
+Laptop screen flickering,Hardware Issue
+Keyboard not working,Hardware Issue
+Mouse not detected,Hardware Issue
+PC keeps shutting down,Hardware Issue
+Unable to connect monitor,Hardware Issue
+High CPU usage on Windows server,Server Issue
+Server restart required due to OS update,Server Issue
+Unable to RDP into server,Server Issue
+Disk space critically low on server,Server Issue
+Windows service not starting,Server Issue
+Server backup failed overnight,Server Issue
+MDM device not syncing,MDM Issue
+Mobile device not enrolled,MDM Issue
+Device shows as non-compliant,MDM Issue
+MDM push notifications failing,MDM Issue
+Unable to deploy app via MDM,MDM Issue
+Antivirus alert: malware detected,Security Issue
+Security scan showing vulnerabilities,Security Issue
+Antivirus definitions outdated,Security Issue
+Unauthorized login attempt detected,Security Issue
+Suspicious network activity alert,Security Issue
+Printer not connecting to network,Printer Issue
+Printer queue stuck,Printer Issue
+Cannot print in color,Printer Issue
+Printer keeps going offline,Printer Issue
+Scanner not working,Printer Issue
+User cannot login to Active Directory,Active Directory Issue
+Password reset required for user,Active Directory Issue
+Account locked out from AD,Active Directory Issue
+AD group membership not updating,Active Directory Issue
+User unable to access shared drive,Active Directory Issue
+AD replication failure in domain,Active Directory Issue
+Cannot connect to WiFi network,Network Issue
+LAN cable unplugged error,Network Issue
+Internet very slow in office,Network Issue
+Network switch port down,Network Issue
+VPN keeps disconnecting,Network Issue
+Unable to access internal website,Network Issue
+Firewall is blocking VPN traffic,Firewall Issue
+Port needs to be opened on firewall,Firewall Issue
+Firewall policy update request,Firewall Issue
+Blocked IP detected on firewall,Firewall Issue
+Firewall dropping packets randomly,Firewall Issue
+Email not syncing in Outlook,Email Issue
+Outlook search not working,Email Issue
+Cannot send emails externally,Email Issue
+Shared mailbox not accessible,Email Issue
+Outlook keeps crashing on startup,Email Issue
+Email stuck in Outbox,Email Issue
+Laptop running very slow,Hardware Issue
+Laptop screen flickering,Hardware Issue
+Keyboard not working,Hardware Issue
+Mouse not detected,Hardware Issue
+PC keeps shutting down,Hardware Issue
+Unable to connect monitor,Hardware Issue
+High CPU usage on Windows server,Server Issue
+Server restart required due to OS update,Server Issue
+Unable to RDP into server,Server Issue
+Disk space critically low on server,Server Issue
+Windows service not starting,Server Issue
+Server backup failed overnight,Server Issue
+MDM device not syncing,MDM Issue
+Mobile device not enrolled,MDM Issue
+Device shows as non-compliant,MDM Issue
+MDM push notifications failing,MDM Issue
+Unable to deploy app via MDM,MDM Issue
+Antivirus alert: malware detected,Security Issue
+Security scan showing vulnerabilities,Security Issue
+Antivirus definitions outdated,Security Issue
+Unauthorized login attempt detected,Security Issue
+Suspicious network activity alert,Security Issue
+Printer not connecting to network,Printer Issue
+Printer queue stuck,Printer Issue
+Cannot print in color,Printer Issue
+Printer keeps going offline,Printer Issue
+Scanner not working,Printer Issue
+User cannot login to Active Directory,Active Directory Issue
+Password reset required for user,Active Directory Issue
+Account locked out from AD,Active Directory Issue
+AD group membership not updating,Active Directory Issue
+User unable to access shared drive,Active Directory Issue
+AD replication failure in domain,Active Directory Issue
+Cannot connect to WiFi network,Network Issue
+LAN cable unplugged error,Network Issue
+Internet very slow in office,Network Issue
+Network switch port down,Network Issue
+VPN keeps disconnecting,Network Issue
+Unable to access internal website,Network Issue
+Firewall is blocking VPN traffic,Firewall Issue
+Port needs to be opened on firewall,Firewall Issue
+Firewall policy update request,Firewall Issue
+Blocked IP detected on firewall,Firewall Issue
+Firewall dropping packets randomly,Firewall Issue
+Email not syncing in Outlook,Email Issue
+Outlook search not working,Email Issue
+Cannot send emails externally,Email Issue
+Shared mailbox not accessible,Email Issue
+Outlook keeps crashing on startup,Email Issue
+Email stuck in Outbox,Email Issue
+Laptop running very slow,Hardware Issue
+Laptop screen flickering,Hardware Issue
+Keyboard not working,Hardware Issue
+Mouse not detected,Hardware Issue
+PC keeps shutting down,Hardware Issue
+Unable to connect monitor,Hardware Issue
+High CPU usage on Windows server,Server Issue
+Server restart required due to OS update,Server Issue
+Unable to RDP into server,Server Issue
+Disk space critically low on server,Server Issue
+Windows service not starting,Server Issue
+Server backup failed overnight,Server Issue
+MDM device not syncing,MDM Issue
+Mobile device not enrolled,MDM Issue
+Device shows as non-compliant,MDM Issue
+MDM push notifications failing,MDM Issue
+Unable to deploy app via MDM,MDM Issue
+Antivirus alert: malware detected,Security Issue
+Security scan showing vulnerabilities,Security Issue
+Antivirus definitions outdated,Security Issue
+Unauthorized login attempt detected,Security Issue
+Suspicious network activity alert,Security Issue
+Printer not connecting to network,Printer Issue
+Printer queue stuck,Printer Issue
+Cannot print in color,Printer Issue
+Printer keeps going offline,Printer Issue
+Scanner not working,Printer Issue
