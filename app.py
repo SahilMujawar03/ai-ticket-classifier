@@ -57,7 +57,8 @@ def load_artifacts():
 model, vectorizer = load_artifacts()
 
 # ----------------- UTILS -----------------
-ADMIN_PASSWORD = "admin123"  # change this if you want
+ADMIN_PASSWORD = st.secrets.get("ADMIN_PASSWORD", "admin123")
+st.sidebar.write("DEBUG: Loaded password =", ADMIN_PASSWORD)
 
 def simple_summary(text: str, max_words: int = 18) -> str:
     """Very simple 'AI-style' summary: first N words."""
