@@ -14,17 +14,22 @@ st.set_page_config(
 )
 
 # ------------------ LOTTIE ANIMATION LOADER ------------------
+from streamlit_lottie import st_lottie
+import requests
+
 def load_lottie_url(url: str):
-    r = requests.get(url)
-    if r.status_code != 200:
+    try:
+        r = requests.get(url)
+        if r.status_code != 200:
+            return None
+        return r.json()
+    except:
         return None
-    return r.json()
 
-# Load animations
-hero_anim = load_lottie_url("https://lottie.host/f8fd6b6a-f728-4af0-b8b0-30e3cbac05f9/v7zMghPq8B.json")
-sidebar_anim = load_lottie_url("https://lottie.host/0b8f75aa-6802-432d-9cf5-d76c31b5a3b5/kWfZC1QU0p.json")
-loading_anim = load_lottie_url("https://lottie.host/fc1b1d5c-2eaf-4304-b33b-f938aecb5c80/SrjLTY1Jsd.json")
-
+# Working animations
+hero_anim = load_lottie_url("https://lottie.host/6a5447a6-b010-4f6d-9d9a-a66f61e63029/ibGWpgtmG9.json")
+sidebar_anim = load_lottie_url("https://lottie.host/49e2ca61-a653-4a92-9d85-1b3b0fe16db2/Ly6rCasVnF.json")
+loading_anim = load_lottie_url("https://lottie.host/30cb2f87-5694-48ce-a2d1-f2f6c9b4e60d/n1w3yF7p9o.json")
 # ------------------ STYLE ------------------
 st.markdown(
     """
