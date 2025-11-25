@@ -13,109 +13,109 @@ st.set_page_config(
     layout="wide",
 )
 
-# ------------------ GLOBAL STYLE (BACKGROUND, HOVER, TABS, TRANSITION) ------------------
+# ------------------ GLOBAL STYLE ------------------
 st.markdown(
     """
     <style>
-    /* Animated gradient background */
+    /* Full-app animated blue/purple gradient background */
     .stApp {
-        background: linear-gradient(120deg, #0f172a, #1e293b, #0f766e, #1d4ed8);
-        background-size: 400% 400%;
-        animation: gradientBG 20s ease infinite;
+        background: linear-gradient(135deg, #1d4ed8, #3b82f6, #6366f1);
+        background-size: 280% 280%;
+        animation: gradientBG 22s ease infinite;
         color: #e5e7eb;
     }
-
     @keyframes gradientBG {
       0% {background-position: 0% 50%;}
       50% {background-position: 100% 50%;}
       100% {background-position: 0% 50%;}
     }
 
-    /* Fade-in page transition */
+    /* Smooth fade-in */
     .main, .block-container {
-        animation: fadeIn 0.8s ease-in-out;
+        animation: fadeIn 0.7s ease-out;
     }
-
     @keyframes fadeIn {
         from {opacity: 0; transform: translateY(4px);}
         to {opacity: 1; transform: translateY(0);}
     }
 
-    /* Big title + subtitle */
+    /* Center column + remove white boxes */
+    .block-container {
+        max-width: 1100px;
+        padding-top: 1.2rem;
+        padding-bottom: 3rem;
+        background-color: transparent !important;
+    }
+
+    /* Title + subtitle */
     .big-title {
         font-size: 42px;
         font-weight: 900;
         text-align: center;
-        margin-bottom: -8px;
-        color: #e5e7eb;
+        margin-bottom: -4px;
+        color: #f9fafb;
     }
     .sub-header {
-        font-size: 19px;
+        font-size: 18px;
         text-align: center;
-        margin-bottom: 24px;
-        color: #cbd5f5;
+        margin-bottom: 22px;
+        color: #e0ebff;
     }
 
-    /* Card-like look for main content */
-    .block-container {
-        max-width: 1100px;
-        padding-top: 1.5rem;
-        padding-bottom: 4rem;
-    }
-
-    /* Button hover effects */
+    /* Buttons with hover */
     .stButton>button {
         background: linear-gradient(120deg, #22c55e, #16a34a);
         border: none;
         color: white;
-        padding: 0.35rem 1.2rem;
+        padding: 0.38rem 1.3rem;
         border-radius: 999px;
         font-weight: 600;
-        transition: all 0.2s ease-in-out;
-        box-shadow: 0 8px 16px rgba(22, 163, 74, 0.35);
+        transition: all 0.18s ease-in-out;
+        box-shadow: 0 8px 16px rgba(22, 163, 74, 0.4);
     }
     .stButton>button:hover {
         transform: translateY(-1px) scale(1.02);
-        box-shadow: 0 14px 24px rgba(22, 163, 74, 0.5);
+        box-shadow: 0 14px 24px rgba(22, 163, 74, 0.6);
         cursor: pointer;
     }
 
-    /* Tabs styling (animated underline + hover) */
+    /* Tabs styling (hover + active) */
     .stTabs [role="tab"] {
         border-radius: 999px;
         padding: 0.4rem 1.4rem;
         margin-right: 0.35rem;
         font-weight: 600;
         color: #e5e7eb;
-        background-color: rgba(15, 23, 42, 0.6);
-        transition: all 0.2s ease-in-out;
-        border: 1px solid rgba(148, 163, 184, 0.4);
+        background-color: rgba(15, 23, 42, 0.35);
+        transition: all 0.18s ease-in-out;
+        border: 1px solid rgba(191, 219, 254, 0.6);
     }
-
     .stTabs [role="tab"]:hover {
         transform: translateY(-1px);
-        border-color: #38bdf8;
-        box-shadow: 0 6px 16px rgba(56, 189, 248, 0.35);
+        border-color: #f97316;
+        box-shadow: 0 6px 16px rgba(248, 166, 62, 0.55);
     }
-
     .stTabs [aria-selected="true"] {
         background: linear-gradient(120deg, #2563eb, #0ea5e9);
         color: white;
-        box-shadow: 0 10px 24px rgba(37, 99, 235, 0.45);
+        box-shadow: 0 10px 24px rgba(15, 23, 42, 0.7);
         border-color: transparent;
     }
 
-    /* Sidebar styling */
+    /* Sidebar: transparent over same gradient (no separate dark panel) */
     section[data-testid="stSidebar"] {
-        background: linear-gradient(180deg, #020617, #0b1120);
-        border-right: 1px solid rgba(148, 163, 184, 0.4);
+        background-color: transparent;
+        backdrop-filter: blur(4px);
     }
-    section[data-testid="stSidebar"] h1, section[data-testid="stSidebar"] h2, section[data-testid="stSidebar"] h3 {
-        color: #e5e7eb;
+    section[data-testid="stSidebar"] h1,
+    section[data-testid="stSidebar"] h2,
+    section[data-testid="stSidebar"] h3,
+    section[data-testid="stSidebar"] label {
+        color: #f9fafb;
     }
 
-    /* Improve dataframe contrast */
-    .dataframe th, .dataframe td {
+    /* Dataframe text darker so it’s readable on white cells */
+    .dataframe td, .dataframe th {
         color: #020617 !important;
     }
     </style>
@@ -123,7 +123,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# ------------------ LOTTIE ANIMATION LOADER ------------------
+# ------------------ LOTTIE ANIMATION HELPERS ------------------
 def load_lottie_url(url: str):
     try:
         r = requests.get(url)
@@ -134,45 +134,40 @@ def load_lottie_url(url: str):
         return None
 
 def safe_lottie(animation, height: int, key: str):
-    """Render a Lottie animation without crashing app if it fails."""
+    """Render a Lottie animation if available; do nothing if it fails."""
     try:
         if animation:
             st_lottie(animation, height=height, key=key)
     except Exception:
         pass
 
-# Working animations
-hero_anim = load_lottie_url("https://lottie.host/6a5447a6-b010-4f6d-9d9a-a66f61e63029/ibGWpgtmG9.json")
-sidebar_anim = load_lottie_url("https://lottie.host/49e2ca61-a653-4a92-9d85-1b3b0fe16db2/Ly6rCasVnF.json")
-loading_anim = load_lottie_url("https://lottie.host/30cb2f87-5694-48ce-a2d1-f2f6c9b4e60d/n1w3yF7p9o.json")
+# Developer typing animation (Option B)
+dev_anim = load_lottie_url(
+    "https://lottie.host/ccafdcc2-bb3c-4cab-9ee5-4858f7dbda1a/0g31xkRS0o.json"
+)
 
-# ------------------ TITLE + HERO ANIMATION ------------------
+# ------------------ TITLE ------------------
 st.markdown("<div class='big-title'>🤖 AI Ticket Classifier</div>", unsafe_allow_html=True)
 st.markdown(
     "<div class='sub-header'>Smart classification of IT support tickets – Active Directory, Network, Hardware, Email, Firewall, MDM, Printer & Security.</div>",
     unsafe_allow_html=True,
 )
 
-safe_lottie(hero_anim, height=230, key="hero")
-
 # ------------------ SIDEBAR ------------------
 st.sidebar.title("ℹ️ About this app")
 st.sidebar.write(
-    "This tool uses a Machine Learning model (Random Forest + TF-IDF)\n"
-    "trained on real-world IT support tickets to automatically\n"
-    "categorize new requests."
+    "This tool uses a Machine Learning model (Random Forest + TF-IDF) "
+    "trained on real-world IT support tickets to automatically categorize new requests."
 )
-
-safe_lottie(sidebar_anim, height=180, key="sidebar")
 
 st.sidebar.markdown("### 🔐 Admin login")
 ADMIN_PASSWORD = st.secrets.get("ADMIN_PASSWORD", "admin123")
-admin_input = st.sidebar.text_input("Enter admin password", type="password", placeholder="Enter admin password")
+admin_input = st.sidebar.text_input("Enter admin password", type="password")
 
 is_admin = admin_input == ADMIN_PASSWORD
 if admin_input and not is_admin:
     st.sidebar.error("Incorrect password.")
-elif is_admin and admin_input:
+elif admin_input and is_admin:
     st.sidebar.success("Admin mode enabled ✅")
 
 # ------------------ LOAD MODEL ------------------
@@ -208,21 +203,20 @@ def log_prediction(ticket: str, prediction: str, confidence: float):
     df = pd.DataFrame([row])
     df.to_csv("prediction_log.csv", mode="a", header=False, index=False)
 
-# ------------------ MAIN UI (TABS) ------------------
+# ------------------ MAIN TABS ------------------
 tab1, tab2, tab3 = st.tabs(["📝 Single Ticket", "📂 Bulk CSV (Admin)", "📊 History (Admin)"])
 
-# --- TAB 1: SINGLE TICKET ---
+# ---------- TAB 1: SINGLE TICKET ----------
 with tab1:
     st.subheader("Classify a single IT support ticket")
 
-    ticket_text = st.text_area("Ticket Description", height=160)
+    ticket_text = st.text_area("Ticket Description", height=150)
 
-    if st.button("Predict Category"):
+    predict_clicked = st.button("Predict Category")
+
+    if predict_clicked:
         if ticket_text.strip():
-            # Animated "page transition" feeling: spinner + loading animation
             with st.spinner("Analyzing ticket with AI..."):
-                safe_lottie(loading_anim, height=120, key="loading")
-
                 X = vectorizer.transform([ticket_text])
                 prediction = model.predict(X)[0]
                 prob = float(model.predict_proba(X).max())
@@ -232,17 +226,19 @@ with tab1:
             st.warning(f"Suggested Fix: {suggest_fix(prediction)}")
 
             log_prediction(ticket_text, prediction, prob)
-
         else:
             st.error("Please enter a ticket description.")
 
-# --- TAB 2: BULK CSV (ADMIN) ---
+    # 👇 Developer typing animation directly under the Predict button / results
+    safe_lottie(dev_anim, height=230, key="dev_under_predict")
+
+# ---------- TAB 2: BULK CSV (ADMIN) ----------
 with tab2:
     if not is_admin:
         st.error("Admin access required. Enter password in the sidebar.")
     else:
-        st.subheader("Upload CSV for bulk classification")
-        st.caption("CSV must contain a column named **'ticket'**.")
+        st.subheader("Bulk classify tickets from CSV")
+        st.caption("Upload a CSV file with a column named **'ticket'** containing ticket descriptions.")
 
         csv_file = st.file_uploader("Upload CSV", type=["csv"])
 
@@ -274,12 +270,12 @@ with tab2:
                         mime="text/csv",
                     )
 
-# --- TAB 3: HISTORY (ADMIN) ---
+# ---------- TAB 3: HISTORY (ADMIN) ----------
 with tab3:
     if not is_admin:
         st.error("Admin access required. Enter password in the sidebar.")
     else:
-        st.subheader("Prediction History")
+        st.subheader("Prediction history")
 
         try:
             log_df = pd.read_csv(
