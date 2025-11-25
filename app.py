@@ -161,6 +161,63 @@ def log_prediction(ticket: str, prediction: str, confidence: float, severity: st
     )
     st.session_state["log_initialized"] = True
 
+
+def generate_user_email(ticket: str, category: str, severity: str) -> str:
+    """Generate a simple email template to send to the end user."""
+    return (
+        f"Subject: Update on your support request ({category})\n\n"
+        f"Hi,\n\n"
+        f"Thank you for raising this issue. Our system has classified your request as "
+        f"**{category}** with a severity level of **{severity}**.\n\n"
+        f"Ticket summary:\n"
+        f"\"{ticket}\"\n\n"
+        f"Our IT team is now reviewing this and will update you with the next steps as soon as possible.\n\n"
+        f"Best regards,\n"
+        f"IT Support Team"
+    )
+
+
+def generate_internal_note(ticket: str, category: str, severity: str, confidence: float) -> str:
+    """Generate an internal IT note for engineers."""
+    return (
+        f"Issue classification: {category}\n"
+        f"Severity: {severity}\n"
+        f"Model confidence: {confidence*100:.2f}%\n\n"
+        f"Original ticket:\n"
+        f"{ticket}\n\n"
+        f"Suggested starting actions:\n"
+        f"- {suggest_fix(category)}\n"
+        f"- Check relevant logs/monitoring tools for this category.\n"
+        f"- Update ticket with findings and next steps."
+    )
+
+
+def jaccard_similarity(a: str, b: str) -> float:
+    """Very simple text similarity using Jaccard over word sets."""
+    set_a = set(a.lower().split())
+    set_b = set(b.lower().split())
+    if not set_a or not set_b:
+        return 0.0
+    return len(set_a & set_b) / len(set_a | set_b)
+
+
+def find_similar_tickets(current_ticket: str, top_n: int = 3):
+    """Return up to top_n similar past tickets from prediction_log.csv."""
+    try:
+        hist_df = pd.read_csv("prediction_log.csv")
+    except FileNotFoundError:
+        return None
+
+    if "ticket" not in hist_df.columns:
+        return None
+
+    hist_df["similarity"] = hist_df["ticket"].astype(str).apply(
+        lambda t: jaccard_similarity(current_ticket, t)
+    )
+    hist_df = hist_df.sort_values("similarity", ascending=False)
+    hist_df = hist_df[hist_df["similarity"] > 0]  # only those with some overlap
+    return hist_df.head(top_n) if not hist_df.empty else None
+
 # ----------------- SIDEBAR -----------------
 with st.sidebar:
     st.header("ℹ️ About this app")
@@ -264,8 +321,29 @@ with tab_single:
             st.markdown("### 📈 Confidence bar")
             st.progress(float(top_conf))
 
+            # NEW: Email templates
+            st.markdown("### 📧 Email templates")
+            user_email = generate_user_email(ticket_text, prediction, severity)
+            internal_note = generate_internal_note(ticket_text, prediction, severity, top_conf)
+
+            with st.expander("📨 Email to user"):
+                st.code(user_email, language="markdown")
+
+            with st.expander("📝 Internal IT note"):
+                st.code(internal_note, language="markdown")
+
             # Log it (now with severity)
             log_prediction(ticket_text, prediction, top_conf, severity)
+
+            # NEW: Similar past tickets
+            st.markdown("### 🔎 Similar past tickets")
+            similar = find_similar_tickets(ticket_text, top_n=3)
+            if similar is not None:
+                st.dataframe(
+                    similar[["timestamp", "ticket", "prediction", "severity", "similarity"]]
+                )
+            else:
+                st.info("No similar tickets found in history yet.")
 
             with st.expander("Show raw model info"):
                 st.write("Classes learned by the model:")
