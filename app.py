@@ -4,8 +4,8 @@ import streamlit as st
 import joblib
 import datetime
 
-from streamlit_lottie import st_lottie   # 🔹 NEW: for animation
-import requests                          # 🔹 NEW: to load animation JSON
+from streamlit_lottie import st_lottie   # animation
+import requests                          # load animation JSON
 
 # ----------------- BASIC CONFIG -----------------
 st.set_page_config(
@@ -60,7 +60,7 @@ def load_lottie(url: str):
     except Exception:
         return None
 
-# Load an AI-themed animation
+# Load an AI-themed animation (typing / dev style)
 lottie_url = "https://assets2.lottiefiles.com/packages/lf20_kyu7xb1v.json"
 lottie_ai = load_lottie(lottie_url)
 
@@ -81,12 +81,14 @@ model, vectorizer = load_artifacts()
 # ----------------- UTILS -----------------
 ADMIN_PASSWORD = st.secrets.get("ADMIN_PASSWORD", "admin123")
 
+
 def simple_summary(text: str, max_words: int = 18) -> str:
     """Very simple 'AI-style' summary: first N words."""
     words = text.split()
     if len(words) <= max_words:
         return text
     return " ".join(words[:max_words]) + "..."
+
 
 def suggest_fix(category: str) -> str:
     suggestions = {
@@ -101,16 +103,62 @@ def suggest_fix(category: str) -> str:
     }
     return suggestions.get(category, "No predefined suggestion available for this category.")
 
-def log_prediction(ticket: str, prediction: str, confidence: float):
-    """Append prediction info to a CSV log."""
+
+def compute_severity(ticket: str, category: str) -> str:
+    """
+    Simple rule-based severity:
+    Critical / High / Medium / Low based on keywords + category.
+    """
+    text = ticket.lower()
+
+    # Critical: everything is down / all users / security
+    critical_keywords = [
+        "all users", "everyone", "server down", "system down",
+        "cannot access", "can't access", "completely down",
+        "data breach", "ransomware", "virus outbreak"
+    ]
+    if any(k in text for k in critical_keywords):
+        return "Critical"
+
+    # High: login issues, repeated disconnects, major impact
+    high_keywords = [
+        "unable to login", "unable to log in", "can't login", "cant login",
+        "vpn disconnecting", "keeps disconnecting", "frequent disconnect",
+        "high priority", "urgent", "very slow", "not working at all"
+    ]
+    if any(k in text for k in high_keywords) or category in [
+        "Active Directory Issue", "Network Issue", "Security Issue"
+    ]:
+        return "High"
+
+    # Medium: intermittent / sometimes / some users / annoying but not full stop
+    medium_keywords = [
+        "sometimes", "intermittent", "occasionally", "some users",
+        "delay", "latency", "partially", "not consistent"
+    ]
+    if any(k in text for k in medium_keywords):
+        return "Medium"
+
+    # Default: Low
+    return "Low"
+
+
+def log_prediction(ticket: str, prediction: str, confidence: float, severity: str):
+    """Append prediction info to a CSV log (with severity)."""
     row = {
         "timestamp": datetime.datetime.now().isoformat(timespec="seconds"),
         "ticket": ticket,
         "prediction": prediction,
         "confidence": round(float(confidence), 4),
+        "severity": severity,
     }
     df = pd.DataFrame([row])
-    df.to_csv("prediction_log.csv", mode="a", header=not st.session_state.get("log_initialized", False), index=False)
+    df.to_csv(
+        "prediction_log.csv",
+        mode="a",
+        header=not st.session_state.get("log_initialized", False),
+        index=False,
+    )
     st.session_state["log_initialized"] = True
 
 # ----------------- SIDEBAR -----------------
@@ -149,8 +197,8 @@ with st.sidebar:
         st.success("Admin mode enabled.")
 
 # ----------------- MAIN LAYOUT -----------------
-tab_single, tab_bulk, tab_history = st.tabs(
-    ["📝 Single Ticket", "📂 Bulk CSV (Admin)", "📊 History (Admin)"]
+tab_single, tab_bulk, tab_history, tab_dashboard = st.tabs(
+    ["📝 Single Ticket", "📂 Bulk CSV (Admin)", "📊 History (Admin)", "📈 Dashboard (Admin)"]
 )
 
 # ---------- SINGLE TICKET TAB ----------
@@ -187,12 +235,18 @@ with tab_single:
                 top_idx = np.argsort(probas)[::-1][:3]
                 top_conf = probas[top_idx[0]]
 
+            # Compute severity
+            severity = compute_severity(ticket_text, prediction)
+
             # Show prediction
             st.markdown(
                 f'<div class="prediction-box">Predicted Category: '
                 f'<b>{prediction}</b></div>',
                 unsafe_allow_html=True,
             )
+
+            st.markdown("### 🚨 Severity")
+            st.info(f"Severity level: **{severity}**")
 
             # Summary & suggestion
             st.markdown("### 🧾 Quick summary")
@@ -210,8 +264,8 @@ with tab_single:
             st.markdown("### 📈 Confidence bar")
             st.progress(float(top_conf))
 
-            # Log it
-            log_prediction(ticket_text, prediction, top_conf)
+            # Log it (now with severity)
+            log_prediction(ticket_text, prediction, top_conf, severity)
 
             with st.expander("Show raw model info"):
                 st.write("Classes learned by the model:")
@@ -255,6 +309,10 @@ with tab_bulk:
                         result_df = bulk_df.copy()
                         result_df["predicted_category"] = preds
                         result_df["confidence"] = max_conf
+                        # Severity for each ticket
+                        result_df["severity"] = [
+                            compute_severity(t, c) for t, c in zip(result_df["ticket"], preds)
+                        ]
 
                         st.markdown("### ✅ Bulk results")
                         st.dataframe(result_df.head(20))
@@ -282,7 +340,58 @@ with tab_history:
 
             # Simple stats by category
             st.markdown("### 📊 Predictions per category")
-            counts = hist_df["prediction"].value_counts()
-            st.bar_chart(counts)
+            if "prediction" in hist_df.columns:
+                counts = hist_df["prediction"].value_counts()
+                st.bar_chart(counts)
+
+            # Severity distribution
+            if "severity" in hist_df.columns:
+                st.markdown("### 🚨 Severity distribution")
+                sev_counts = hist_df["severity"].value_counts()
+                st.bar_chart(sev_counts)
         except FileNotFoundError:
             st.info("No history found yet. Make some predictions first.")
+
+# ---------- DASHBOARD TAB (ADMIN) ----------
+with tab_dashboard:
+    st.subheader("📈 Ticket Analytics Dashboard")
+
+    if not is_admin:
+        st.warning("Admin access required. Enter password in the sidebar to view dashboard.")
+    else:
+        try:
+            dash_df = pd.read_csv("prediction_log.csv")
+
+            # Ensure columns
+            if "timestamp" in dash_df.columns:
+                dash_df["date"] = pd.to_datetime(dash_df["timestamp"]).dt.date
+
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("Total tickets", len(dash_df))
+            with col2:
+                if "prediction" in dash_df.columns:
+                    st.metric("Unique categories", dash_df["prediction"].nunique())
+            with col3:
+                if "severity" in dash_df.columns:
+                    st.metric("Distinct severities", dash_df["severity"].nunique())
+
+            st.markdown("### 📊 Tickets per category")
+            if "prediction" in dash_df.columns:
+                cat_counts = dash_df["prediction"].value_counts()
+                st.bar_chart(cat_counts)
+
+            st.markdown("### 🚨 Tickets per severity")
+            if "severity" in dash_df.columns:
+                sev_counts = dash_df["severity"].value_counts().reindex(
+                    ["Low", "Medium", "High", "Critical"]
+                ).fillna(0)
+                st.bar_chart(sev_counts)
+
+            if "date" in dash_df.columns:
+                st.markdown("### ⏱ Tickets over time")
+                time_counts = dash_df.groupby("date").size()
+                st.line_chart(time_counts)
+
+        except FileNotFoundError:
+            st.info("No data yet. Make some predictions to see analytics.")
