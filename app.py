@@ -1,198 +1,154 @@
-import numpy as np
-import pandas as pd
 import streamlit as st
+import pandas as pd
 import joblib
-import datetime
-import requests
-from streamlit_lottie import st_lottie
 import os
-
-# ----------------- BASIC CONFIG -----------------
-st.set_page_config(
-    page_title="AI Ticket Classifier",
-    page_icon="💻",
-    layout="wide",
-)
-
-# ----------------- USER MANAGEMENT (CSV) -----------------
-
-USER_FILE = "users.csv"
-
-# Create default users.csv if missing
-if not os.path.exists(USER_FILE):
-    df_default = pd.DataFrame([
-        ["admin", "admin123", "admin"],
-        ["engineer", "engineer123", "engineer"],
-        ["user", "user123", "user"]
-    ], columns=["username", "password", "role"])
-    df_default.to_csv(USER_FILE, index=False)
-
-def load_users():
-    return pd.read_csv(USER_FILE)
-
-def save_users(df):
-    df.to_csv(USER_FILE, index=False)
-
-# ----------------- AUTH STATE -----------------
-def init_auth_state():
-    if "auth" not in st.session_state:
-        st.session_state["auth"] = {
-            "logged_in": False,
-            "username": None,
-            "role": None,
-        }
-
-init_auth_state()
-
-# ----------------- LOGIN SCREEN -----------------
-def login_screen():
-    st.markdown("<h2 style='text-align:center;'>🔐 Login to AI Ticket Classifier</h2>", unsafe_allow_html=True)
-    st.write("")
-    
-    col1, col2, col3 = st.columns([1,2,1])
-    with col2:
-        username = st.text_input("Username")
-        password = st.text_input("Password", type="password")
-
-        if st.button("Login"):
-            users = load_users()
-            
-            match = users[(users["username"] == username) & (users["password"] == password)]
-            
-            if not match.empty:
-                role = match["role"].values[0]
-
-                st.session_state["auth"] = {
-                    "logged_in": True,
-                    "username": username,
-                    "role": role,
-                }
-                st.success(f"Welcome, {username} ({role})!")
-                st.rerun()
-            else:
-                st.error("Invalid username or password.")
-
-if not st.session_state["auth"]["logged_in"]:
-    login_screen()
-    st.stop()
-
-username = st.session_state["auth"]["username"]
-role = st.session_state["auth"]["role"]
-
-# ----------------- STYLE -----------------
-st.markdown("""
-<style>
-.big-title {
-    font-size: 40px;
-    font-weight: 800;
-    text-align: center;
-    margin-bottom: 4px;
-}
-.sub-header {
-    font-size: 17px;
-    text-align: center;
-    margin-bottom: 25px;
-    color: #555;
-}
-.prediction-box {
-    padding: 12px 16px;
-    border-radius: 8px;
-    background-color: #e8f7e8;
-    border: 1px solid #c2e5c2;
-    margin-top: 10px;
-}
-</style>
-""", unsafe_allow_html=True)
-
-# ----------------- TITLE -----------------
-st.markdown('<div class="big-title">🧠 AI Ticket Classifier</div>', unsafe_allow_html=True)
-st.markdown('<div class="sub-header">Smart classification of IT support tickets.</div>', unsafe_allow_html=True)
-
-# ----------------- ANIMATION -----------------
-def load_lottie(url: str):
-    try:
-        r = requests.get(url)
-        if r.status_code != 200:
-            return None
-        return r.json()
-    except:
-        return None
-
-lottie_url = "https://assets2.lottiefiles.com/packages/lf20_kyu7xb1v.json"
-lottie_ai = load_lottie(lottie_url)
-
-if lottie_ai:
-    st_lottie(lottie_ai, height=230, key="aiAnimation")
 
 # ----------------- LOAD MODEL -----------------
 @st.cache_resource
 def load_artifacts():
-    return joblib.load("model.pkl"), joblib.load("vectorizer.pkl")
+    model = joblib.load("model.pkl")
+    vectorizer = joblib.load("vectorizer.pkl")
+    return model, vectorizer
 
 model, vectorizer = load_artifacts()
 
-# ----------------- TABS -----------------
-tab_single, tab_bulk, tab_users = st.tabs(["📝 Single Ticket", "📂 Bulk CSV", "👥 User Management"])
+USERS_FILE = "users.csv"
 
-# ----------------- 1. SINGLE TICKET -----------------
-with tab_single:
-    st.subheader("Classify a single IT ticket")
-    ticket_text = st.text_area("Ticket Description", height=120)
+# ----------------- USER SYSTEM -----------------
+def load_users():
+    if not os.path.exists(USERS_FILE):
+        df = pd.DataFrame(columns=["username", "password", "role"])
+        df.to_csv(USERS_FILE, index=False)
+        return df
+    return pd.read_csv(USERS_FILE)
 
-    if st.button("Predict Category"):
-        if not ticket_text.strip():
-            st.warning("Please enter a ticket description.")
-        else:
-            vec = vectorizer.transform([ticket_text])
-            prediction = model.predict(vec)[0]
+def save_users(df):
+    df.to_csv(USERS_FILE, index=False)
 
-            st.markdown(f'<div class="prediction-box">Predicted Category: <b>{prediction}</b></div>', unsafe_allow_html=True)
-
-# ----------------- 2. BULK CSV -----------------
-with tab_bulk:
-    if role not in ["admin", "engineer"]:
-        st.warning("Only admin/engineers can use bulk feature")
-    else:
-        uploaded = st.file_uploader("Upload CSV with a 'ticket' column")
-        if uploaded:
-            df = pd.read_csv(uploaded)
-            df["prediction"] = model.predict(vectorizer.transform(df["ticket"]))
-            st.dataframe(df)
-            st.download_button("Download results", df.to_csv(index=False), "bulk_results.csv")
-
-# ----------------- 3. USER MANAGEMENT -----------------
-with tab_users:
-    st.subheader("User Management (Admin Only)")
-
-    if role != "admin":
-        st.warning("Only admin can manage users.")
-        st.stop()
-
+def authenticate(username, password):
     users = load_users()
-    st.dataframe(users)
+    row = users[(users["username"] == username) & (users["password"] == password)]
+    if len(row) == 1:
+        return True, row.iloc[0]["role"]
+    return False, None
 
-    st.markdown("### ➕ Add New User")
-    new_user = st.text_input("Username")
-    new_pass = st.text_input("Password")
-    new_role = st.selectbox("Role", ["admin", "engineer", "user"])
+# ----------------- CHANGE PASSWORD -----------------
+def change_password(username, old_pass, new_pass):
+    users = load_users()
+    row = users[(users["username"] == username) & (users["password"] == old_pass)]
+    if len(row) == 0:
+        return False
+    
+    users.loc[users["username"] == username, "password"] = new_pass
+    save_users(users)
+    return True
 
-    if st.button("Add User"):
-        if new_user.strip() == "" or new_pass.strip() == "":
-            st.error("Fields cannot be empty.")
+
+# ----------------- LOGIN SCREEN -----------------
+def login_screen():
+    st.title("🔐 Login to AI Ticket Classifier")
+    username = st.text_input("Username")
+    password = st.text_input("Password", type="password")
+
+    if st.button("Login"):
+        ok, role = authenticate(username, password)
+        if ok:
+            st.session_state["logged_in"] = True
+            st.session_state["username"] = username
+            st.session_state["role"] = role
+            st.experimental_rerun()
         else:
-            users.loc[len(users)] = [new_user, new_pass, new_role]
-            save_users(users)
-            st.success("User added successfully.")
-            st.rerun()
+            st.error("Invalid username or password")
 
-    st.markdown("### 🗑 Delete User")
-    del_user = st.selectbox("Select user to delete", users["username"])
 
-    if st.button("Delete User"):
-        if del_user == "admin":
-            st.error("Admin cannot be deleted.")
+# ----------------- MAIN APP -----------------
+def app_home():
+    st.title("🧠 AI Ticket Classifier")
+    st.write("Smart classification of IT support tickets.")
+
+    tab1, tab2, tab3 = st.tabs([
+        "🎫 Single Ticket",
+        "📊 Bulk CSV",
+        "👥 User Management" if st.session_state["role"] == "admin" else "👤 Change Password"
+    ])
+
+    # ------- Single Ticket -------
+    with tab1:
+        st.subheader("Classify a single IT ticket")
+        ticket = st.text_area("Ticket Description")
+        
+        if st.button("Predict Category"):
+            if ticket.strip() == "":
+                st.warning("Please enter a ticket description.")
+            else:
+                X = vectorizer.transform([ticket])
+                pred = model.predict(X)[0]
+                st.success(f"Predicted Category: **{pred}**")
+
+    # ------- Bulk CSV (Admin + Engineer) -------
+    with tab2:
+        st.subheader("Upload CSV")
+        st.info("Only admin or engineer can use this.")
+        
+        if st.session_state["role"] in ["admin", "engineer"]:
+            file = st.file_uploader("Upload CSV", type=["csv"])
+            if file:
+                df = pd.read_csv(file)
+                df["prediction"] = model.predict(vectorizer.transform(df["ticket"]))
+                st.dataframe(df)
         else:
-            users = users[users["username"] != del_user]
-            save_users(users)
-            st.success("User deleted.")
-            st.rerun()
+            st.error("You do not have permission for this section.")
+
+    # ------- Admin User Management -------
+    if st.session_state["role"] == "admin":
+        with tab3:
+            st.subheader("Manage Users")
+            users = load_users()
+            st.dataframe(users)
+
+            st.write("### ➕ Add New User")
+            new_user = st.text_input("New Username")
+            new_pass = st.text_input("New Password")
+            new_role = st.selectbox("Role", ["admin", "engineer", "user"])
+
+            if st.button("Create User"):
+                if new_user in users["username"].values:
+                    st.error("User already exists!")
+                else:
+                    new_row = pd.DataFrame({"username":[new_user], "password":[new_pass], "role":[new_role]})
+                    save_users(pd.concat([users, new_row], ignore_index=True))
+                    st.success("User added successfully!")
+                    st.experimental_rerun()
+
+    # ------- User Change Password (non-admin) -------
+    else:
+        with tab3:
+            st.subheader("Change Password")
+            old_pass = st.text_input("Old Password", type="password")
+            new_pass = st.text_input("New Password", type="password")
+
+            if st.button("Update Password"):
+                if change_password(st.session_state["username"], old_pass, new_pass):
+                    st.success("Password updated successfully!")
+                else:
+                    st.error("Incorrect old password.")
+
+    # ------- Logout -------
+    st.sidebar.button("Logout", on_click=lambda: logout())
+
+
+# ----------------- LOGOUT -----------------
+def logout():
+    for key in ["logged_in", "username", "role"]:
+        st.session_state.pop(key, None)
+    st.experimental_rerun()
+
+
+# ----------------- APP ENTRY -----------------
+if "logged_in" not in st.session_state:
+    st.session_state["logged_in"] = False
+
+if not st.session_state["logged_in"]:
+    login_screen()
+else:
+    app_home()
