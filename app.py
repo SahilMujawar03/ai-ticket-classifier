@@ -3,9 +3,8 @@ import pandas as pd
 import streamlit as st
 import joblib
 import datetime
-
-from streamlit_lottie import st_lottie   # animation
-import requests                          # load animation JSON
+import requests
+from streamlit_lottie import st_lottie
 
 # ----------------- BASIC CONFIG -----------------
 st.set_page_config(
@@ -13,6 +12,71 @@ st.set_page_config(
     page_icon="💻",
     layout="wide",
 )
+
+# ----------------- AUTH / USERS -----------------
+# Reuse ADMIN_PASSWORD from secrets for the 'admin' user
+ADMIN_PASSWORD = st.secrets.get("ADMIN_PASSWORD", "admin123")
+
+USERS = {
+    "admin": {
+        "password": ADMIN_PASSWORD,
+        "role": "admin",
+    },
+    "engineer": {
+        "password": "engineer123",  # demo password; change in real usage
+        "role": "engineer",
+    },
+    "user": {
+        "password": "user123",  # demo password; change in real usage
+        "role": "user",
+    },
+}
+
+
+def init_auth_state():
+    if "auth" not in st.session_state:
+        st.session_state["auth"] = {
+            "logged_in": False,
+            "username": None,
+            "role": None,
+        }
+
+
+def login_screen():
+    st.markdown(
+        "<h2 style='text-align:center;'>🔐 Login to AI Ticket Classifier</h2>",
+        unsafe_allow_html=True,
+    )
+    st.write("")
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        username = st.text_input("Username")
+        password = st.text_input("Password", type="password")
+        if st.button("Login"):
+            user = USERS.get(username)
+            if user and user["password"] == password:
+                st.session_state["auth"]["logged_in"] = True
+                st.session_state["auth"]["username"] = username
+                st.session_state["auth"]["role"] = user["role"]
+                st.success(f"Welcome, {username} ({user['role']})!")
+                st.experimental_rerun()
+            else:
+                st.error("Invalid username or password.")
+
+
+init_auth_state()
+auth = st.session_state["auth"]
+
+# If not logged in, show login screen and stop
+if not auth["logged_in"]:
+    login_screen()
+    st.stop()
+
+username = auth["username"]
+role = auth["role"]
+can_bulk = role in ("admin", "engineer")
+can_history = role in ("admin", "engineer")
+can_dashboard = role == "admin"
 
 # ----------------- STYLE -----------------
 st.markdown(
@@ -60,6 +124,7 @@ def load_lottie(url: str):
     except Exception:
         return None
 
+
 # Load an AI-themed animation (typing / dev style)
 lottie_url = "https://assets2.lottiefiles.com/packages/lf20_kyu7xb1v.json"
 lottie_ai = load_lottie(lottie_url)
@@ -79,9 +144,6 @@ def load_artifacts():
 model, vectorizer = load_artifacts()
 
 # ----------------- UTILS -----------------
-ADMIN_PASSWORD = st.secrets.get("ADMIN_PASSWORD", "admin123")
-
-
 def simple_summary(text: str, max_words: int = 18) -> str:
     """Very simple 'AI-style' summary: first N words."""
     words = text.split()
@@ -220,6 +282,19 @@ def find_similar_tickets(current_ticket: str, top_n: int = 3):
 
 # ----------------- SIDEBAR -----------------
 with st.sidebar:
+    st.header("👤 Logged in")
+    st.write(f"**User:** {username}")
+    st.write(f"**Role:** {role.capitalize()}")
+
+    if st.button("Logout"):
+        st.session_state["auth"] = {
+            "logged_in": False,
+            "username": None,
+            "role": None,
+        }
+        st.experimental_rerun()
+
+    st.markdown("---")
     st.header("ℹ️ About this app")
     st.write(
         """
@@ -244,21 +319,12 @@ with st.sidebar:
         index=0,
     )
 
-    st.markdown("---")
-    st.subheader("🔐 Admin login")
-    password = st.text_input("Password", type="password", placeholder="Enter admin password")
-    is_admin = password == ADMIN_PASSWORD
-    if password and not is_admin:
-        st.error("Incorrect password.")
-    elif is_admin:
-        st.success("Admin mode enabled.")
-
 # ----------------- MAIN LAYOUT -----------------
 tab_single, tab_bulk, tab_history, tab_dashboard = st.tabs(
-    ["📝 Single Ticket", "📂 Bulk CSV (Admin)", "📊 History (Admin)", "📈 Dashboard (Admin)"]
+    ["📝 Single Ticket", "📂 Bulk CSV", "📊 History", "📈 Dashboard"]
 )
 
-# ---------- SINGLE TICKET TAB ----------
+# ---------- SINGLE TICKET TAB (ALL ROLES) ----------
 with tab_single:
     st.subheader("Classify a single IT support ticket")
 
@@ -321,7 +387,7 @@ with tab_single:
             st.markdown("### 📈 Confidence bar")
             st.progress(float(top_conf))
 
-            # NEW: Email templates
+            # Email templates
             st.markdown("### 📧 Email templates")
             user_email = generate_user_email(ticket_text, prediction, severity)
             internal_note = generate_internal_note(ticket_text, prediction, severity, top_conf)
@@ -335,7 +401,7 @@ with tab_single:
             # Log it (now with severity)
             log_prediction(ticket_text, prediction, top_conf, severity)
 
-            # NEW: Similar past tickets
+            # Similar past tickets
             st.markdown("### 🔎 Similar past tickets")
             similar = find_similar_tickets(ticket_text, top_n=3)
             if similar is not None:
@@ -349,12 +415,12 @@ with tab_single:
                 st.write("Classes learned by the model:")
                 st.write(list(model.classes_))
 
-# ---------- BULK CSV TAB (ADMIN) ----------
+# ---------- BULK CSV TAB (ADMIN/ENGINEER ONLY) ----------
 with tab_bulk:
     st.subheader("Bulk classify tickets from CSV")
 
-    if not is_admin:
-        st.warning("Admin access required. Enter password in the sidebar to use this feature.")
+    if not can_bulk:
+        st.warning("This feature is only available for Engineer and Admin roles.")
     else:
         st.write("Upload a CSV file with a column named **'ticket'** containing ticket texts.")
 
@@ -404,12 +470,12 @@ with tab_bulk:
                             mime="text/csv",
                         )
 
-# ---------- HISTORY TAB (ADMIN) ----------
+# ---------- HISTORY TAB (ADMIN/ENGINEER ONLY) ----------
 with tab_history:
     st.subheader("Prediction history")
 
-    if not is_admin:
-        st.warning("Admin access required. Enter password in the sidebar to view history.")
+    if not can_history:
+        st.warning("This feature is only available for Engineer and Admin roles.")
     else:
         try:
             hist_df = pd.read_csv("prediction_log.csv")
@@ -430,12 +496,12 @@ with tab_history:
         except FileNotFoundError:
             st.info("No history found yet. Make some predictions first.")
 
-# ---------- DASHBOARD TAB (ADMIN) ----------
+# ---------- DASHBOARD TAB (ADMIN ONLY) ----------
 with tab_dashboard:
     st.subheader("📈 Ticket Analytics Dashboard")
 
-    if not is_admin:
-        st.warning("Admin access required. Enter password in the sidebar to view dashboard.")
+    if not can_dashboard:
+        st.warning("This dashboard is only available for Admin role.")
     else:
         try:
             dash_df = pd.read_csv("prediction_log.csv")
