@@ -1,3 +1,5 @@
+import os
+import hashlib
 import numpy as np
 import pandas as pd
 import streamlit as st
@@ -13,26 +15,48 @@ st.set_page_config(
     layout="wide",
 )
 
-# ----------------- AUTH / USERS -----------------
-# Reuse ADMIN_PASSWORD from secrets for the 'admin' user
+# ----------------- USER STORAGE CONFIG -----------------
+USERS_CSV = "users.csv"
 ADMIN_PASSWORD = st.secrets.get("ADMIN_PASSWORD", "admin123")
 
-USERS = {
-    "admin": {
-        "password": ADMIN_PASSWORD,
-        "role": "admin",
-    },
-    "engineer": {
-        "password": "engineer123",  # demo password; change in real usage
-        "role": "engineer",
-    },
-    "user": {
-        "password": "user123",  # demo password; change in real usage
-        "role": "user",
-    },
-}
+
+def hash_password(password: str) -> str:
+    """Return a SHA256 hash of the password."""
+    return hashlib.sha256(password.encode("utf-8")).hexdigest()
 
 
+def load_users() -> pd.DataFrame:
+    """
+    Load users from users.csv.
+    If file does not exist, create default users:
+    - admin (password from secrets ADMIN_PASSWORD)
+    - engineer / engineer123
+    - user / user123
+    """
+    if os.path.exists(USERS_CSV):
+        df = pd.read_csv(USERS_CSV)
+        # Backward compatibility: ensure required columns exist
+        if not {"username", "password_hash", "role"}.issubset(df.columns):
+            raise ValueError("users.csv missing required columns.")
+        return df
+
+    # Create default users
+    default_users = [
+        {"username": "admin", "password_hash": hash_password(ADMIN_PASSWORD), "role": "admin"},
+        {"username": "engineer", "password_hash": hash_password("engineer123"), "role": "engineer"},
+        {"username": "user", "password_hash": hash_password("user123"), "role": "user"},
+    ]
+    df = pd.DataFrame(default_users)
+    df.to_csv(USERS_CSV, index=False)
+    return df
+
+
+def save_users(df: pd.DataFrame) -> None:
+    """Save users back to CSV."""
+    df.to_csv(USERS_CSV, index=False)
+
+
+# ----------------- AUTH / SESSION -----------------
 def init_auth_state():
     if "auth" not in st.session_state:
         st.session_state["auth"] = {
@@ -53,16 +77,20 @@ def login_screen():
         username = st.text_input("Username")
         password = st.text_input("Password", type="password")
         if st.button("Login"):
-            user = USERS.get(username)
-            if user and user["password"] == password:
-                st.session_state["auth"]["logged_in"] = True
-                st.session_state["auth"]["username"] = username
-                st.session_state["auth"]["role"] = user["role"]
-                st.success(f"Welcome, {username} ({user['role']})!")
+            users_df = load_users()
+            row = users_df[users_df["username"] == username]
 
-                # 🔧 FIX APPLIED HERE
-                st.rerun()
-
+            if not row.empty:
+                stored_hash = row.iloc[0]["password_hash"]
+                if stored_hash == hash_password(password):
+                    role = row.iloc[0]["role"]
+                    st.session_state["auth"]["logged_in"] = True
+                    st.session_state["auth"]["username"] = username
+                    st.session_state["auth"]["role"] = role
+                    st.success(f"Welcome, {username} ({role})!")
+                    st.rerun()
+                else:
+                    st.error("Invalid username or password.")
             else:
                 st.error("Invalid username or password.")
 
@@ -77,6 +105,8 @@ if not auth["logged_in"]:
 
 username = auth["username"]
 role = auth["role"]
+
+# Roles for permissions
 can_bulk = role in ("admin", "engineer")
 can_history = role in ("admin", "engineer")
 can_dashboard = role == "admin"
@@ -242,14 +272,94 @@ with st.sidebar:
     st.write(f"**User:** {username}")
     st.write(f"**Role:** {role.capitalize()}")
 
+    # Self password change
+    with st.expander("Change my password"):
+        old_pw = st.text_input("Current password", type="password", key="old_pw")
+        new_pw = st.text_input("New password", type="password", key="new_pw")
+        new_pw2 = st.text_input("Confirm new password", type="password", key="new_pw2")
+
+        if st.button("Update my password"):
+            if not old_pw or not new_pw or not new_pw2:
+                st.error("Please fill all password fields.")
+            elif new_pw != new_pw2:
+                st.error("New passwords do not match.")
+            else:
+                users_df = load_users()
+                row_idx = users_df.index[users_df["username"] == username]
+
+                if len(row_idx) == 0:
+                    st.error("User not found in user database.")
+                else:
+                    stored_hash = users_df.loc[row_idx[0], "password_hash"]
+                    if stored_hash != hash_password(old_pw):
+                        st.error("Current password is incorrect.")
+                    else:
+                        users_df.loc[row_idx[0], "password_hash"] = hash_password(new_pw)
+                        save_users(users_df)
+                        st.success("Password updated successfully. Use new password on next login.")
+
+    # Admin-only user management
+    if role == "admin":
+        st.markdown("---")
+        st.subheader("👥 Admin: Manage users")
+
+        manage_tab = st.radio(
+            "Select action:",
+            ["Add new user", "Reset user password"],
+            key="admin_manage_users",
+        )
+
+        users_df_current = load_users()
+
+        if manage_tab == "Add new user":
+            new_username = st.text_input("New username")
+            new_password = st.text_input("New password", type="password")
+            new_role = st.selectbox("Role", ["admin", "engineer", "user"])
+
+            if st.button("Create user"):
+                if not new_username or not new_password:
+                    st.error("Username and password are required.")
+                elif new_username in users_df_current["username"].values:
+                    st.error("This username already exists.")
+                else:
+                    new_row = {
+                        "username": new_username,
+                        "password_hash": hash_password(new_password),
+                        "role": new_role,
+                    }
+                    users_df_current = pd.concat(
+                        [users_df_current, pd.DataFrame([new_row])],
+                        ignore_index=True,
+                    )
+                    save_users(users_df_current)
+                    st.success(f"User '{new_username}' created successfully.")
+
+        elif manage_tab == "Reset user password":
+            if users_df_current.empty:
+                st.info("No users found.")
+            else:
+                reset_user = st.selectbox(
+                    "Select user to reset password",
+                    users_df_current["username"].tolist(),
+                )
+                new_pw_reset = st.text_input("New password for this user", type="password")
+
+                if st.button("Reset password"):
+                    if not new_pw_reset:
+                        st.error("New password cannot be empty.")
+                    else:
+                        idx = users_df_current.index[users_df_current["username"] == reset_user][0]
+                        users_df_current.loc[idx, "password_hash"] = hash_password(new_pw_reset)
+                        save_users(users_df_current)
+                        st.success(f"Password for '{reset_user}' has been reset.")
+
+    st.markdown("---")
     if st.button("Logout"):
         st.session_state["auth"] = {
             "logged_in": False,
             "username": None,
             "role": None,
         }
-
-        # 🔧 FIX APPLIED HERE
         st.rerun()
 
     st.markdown("---")
@@ -320,7 +430,7 @@ with tab_single:
             st.markdown("### 🧾 Summary")
             st.info(simple_summary(ticket_text))
 
-            st.markdown("### 🛠 Suggested fix")
+            st.markmarkdown("### 🛠 Suggested fix")
             st.info(suggest_fix(prediction))
 
             st.markdown("### 🔍 Confidence")
@@ -341,4 +451,4 @@ with tab_single:
             else:
                 st.info("No similar tickets found.")
 
-# (Bulk, History, Dashboard tabs unchanged)
+# (Bulk, History, Dashboard tabs: keep your existing implementations here)
