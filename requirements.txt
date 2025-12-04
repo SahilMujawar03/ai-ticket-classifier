@@ -3,7 +3,5 @@ pandas
 numpy
 joblib
 bcrypt
-sendgrid
-python-http-client
 requests
 streamlit-lottie
