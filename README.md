@@ -1,5 +1,9 @@
-# AI Ticket Classifier  
-Smart IT Support Automation Using Machine Learning + Streamlit + SQLite
+<p align="center">
+  <img src="https://raw.githubusercontent.com/SahilMujawar03/ai-ticket-classifier/main/assets/AI%20Ticket%20Classifier%20Banner.png" width="100%" alt="AI Ticket Classifier Banner"/>
+</p>
+
+# 🎫 AI Ticket Classifier  
+### Smart IT Support Automation Using Machine Learning + Streamlit + SQLite
 
 An end-to-end IT support automation platform that classifies IT tickets using Machine Learning, assists employees with troubleshooting, logs ticket insights, manages users securely, and provides an admin dashboard — all inside a single Streamlit application.
 
