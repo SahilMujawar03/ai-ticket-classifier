@@ -1,9 +1,9 @@
 streamlit
-scikit-learn
-joblib
 pandas
 numpy
-matplotlib
-nltk
-streamlit-lottie
+joblib
+bcrypt
+sendgrid
+python-http-client
 requests
+streamlit-lottie
