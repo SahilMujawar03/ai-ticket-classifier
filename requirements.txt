@@ -5,3 +5,4 @@ joblib
 bcrypt
 requests
 streamlit-lottie
+scikit-learn
