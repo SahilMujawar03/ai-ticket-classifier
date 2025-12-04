@@ -86,6 +86,8 @@ EMAIL_TO_IT = os.getenv("EMAIL_TO_IT", "")
 
 SLACK_WEBHOOK_URL = os.getenv("SLACK_WEBHOOK_URL", "")
 
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+
 # ======================================================
 # PASSWORD / USER HELPERS
 # ======================================================
@@ -115,7 +117,6 @@ def ensure_admin_user():
         cur = db.execute("SELECT COUNT(*) AS c FROM users")
         count = cur.fetchone()["c"]
         if count == 0:
-            # default admin
             admin_user = "admin"
             admin_pass = "sahil123"
             db.execute(
@@ -189,6 +190,21 @@ init_db()
 ensure_admin_user()
 
 # ======================================================
+# MODEL / VECTORIZER LOADING
+# ======================================================
+@st.cache_resource
+def load_artifacts():
+    try:
+        model = joblib.load("model.pkl")
+        vectorizer = joblib.load("vectorizer.pkl")
+        return model, vectorizer, None
+    except Exception as e:
+        return None, None, str(e)
+
+
+model, vectorizer, model_error = load_artifacts()
+
+# ======================================================
 # SESSION AUTH STATE
 # ======================================================
 if "auth" not in st.session_state:
@@ -228,9 +244,6 @@ def check_session_timeout():
         st.warning("Your session has expired due to inactivity. Please log in again.")
 
 
-# ======================================================
-# LOGIN UI
-# ======================================================
 def login_screen():
     st.markdown(
         "<h1 style='text-align:center; margin-bottom:0;'>🔐 Login to AI Ticket Classifier</h1>",
@@ -308,7 +321,7 @@ is_admin = role == "admin"
 can_bulk = role in ("admin", "engineer")
 
 # ======================================================
-# STYLING
+# STYLING + TITLE
 # ======================================================
 st.markdown(
     """
@@ -337,9 +350,6 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# ======================================================
-# TITLE + HERO
-# ======================================================
 st.markdown('<div class="big-title">🧠 AI Ticket Classifier</div>', unsafe_allow_html=True)
 st.markdown(
     '<div class="sub-header">Smart classification of IT support tickets for '
@@ -362,21 +372,6 @@ lottie_url = "https://assets2.lottiefiles.com/packages/lf20_kyu7xb1v.json"
 lottie_ai = load_lottie(lottie_url)
 if lottie_ai:
     st_lottie(lottie_ai, height=220, key="hero_animation")
-
-# ======================================================
-# MODEL / VECTORIZER
-# ======================================================
-@st.cache_resource
-def load_artifacts():
-    try:
-        model = joblib.load("model.pkl")
-        vectorizer = joblib.load("vectorizer.pkl")
-        return model, vectorizer, None
-    except Exception as e:
-        return None, None, str(e)
-
-
-model, vectorizer, model_error = load_artifacts()
 
 # ======================================================
 # TICKET / LOGIC UTILITIES
@@ -553,9 +548,9 @@ def notify_critical_or_high(ticket: str, category: str, severity: str, confidenc
 
 
 # ======================================================
-# AI HELP ASSISTANT
+# AI HELP ASSISTANT (ML + CHATGPT)
 # ======================================================
-def generate_ai_help(ticket_text: str, category: str, severity: str) -> str:
+def generate_ai_help_ml(ticket_text: str, category: str, severity: str) -> str:
     text = ticket_text.lower()
     base_fix = suggest_fix(category)
     extra = []
@@ -605,7 +600,7 @@ def generate_ai_help(ticket_text: str, category: str, severity: str) -> str:
     tips_str = "\n".join(dict.fromkeys(tips))  # remove duplicates
 
     message = (
-        "### 🤖 Smart Help Summary\n"
+        "### 🧠 ML Helper Summary\n"
         f"- Predicted area: **{category}**\n"
         f"- Estimated severity: **{severity}**\n\n"
         "### ✅ Suggested steps\n"
@@ -613,6 +608,47 @@ def generate_ai_help(ticket_text: str, category: str, severity: str) -> str:
         "If these steps don’t solve your issue, please raise a ticket so the IT team can help you further."
     )
     return message
+
+
+def generate_ai_help_chatgpt(ticket_text: str) -> str:
+    if not OPENAI_API_KEY:
+        return (
+            "⚠️ OpenAI API key is not configured.\n\n"
+            "Ask your admin to set `OPENAI_API_KEY` in Streamlit secrets."
+        )
+
+    # Import inside function so app doesn't crash if openai isn't installed
+    try:
+        from openai import OpenAI
+    except ImportError:
+        return (
+            "⚠️ The `openai` Python package is not installed.\n\n"
+            "Add `openai` to requirements.txt and redeploy."
+        )
+
+    client = OpenAI(api_key=OPENAI_API_KEY)
+
+    prompt = (
+        "You are an IT helpdesk assistant for a company. "
+        "Give clear, step-by-step troubleshooting for the user's issue. "
+        "Focus on practical steps an employee can follow. "
+        "Use short sections: Possible causes, Step-by-step fix, When to contact IT.\n\n"
+        f"User issue: {ticket_text}"
+    )
+
+    try:
+        resp = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": "You are a helpful IT support assistant."},
+                {"role": "user", "content": prompt},
+            ],
+            temperature=0.3,
+        )
+        answer = resp.choices[0].message.content
+        return f"### 🤖 ChatGPT Assistant\n\n{answer}"
+    except Exception as e:
+        return f"⚠️ ChatGPT call failed: {e}"
 
 
 # ======================================================
@@ -753,33 +789,50 @@ with tab_objects[tab_idx]:
 tab_idx += 1
 
 # ------------------------------------------------------
-# 2) AI Help Assistant
+# 2) AI Help Assistant (ML + ChatGPT)
 # ------------------------------------------------------
 with tab_objects[tab_idx]:
     st.subheader("AI Help Assistant for Employees")
 
-    help_text = st.text_area(
-        "Describe your IT issue in your own words (e.g., 'My printer is not connecting to the network')",
-        height=120,
-        key="ai_help_text",
-    )
+    help_tabs = st.tabs(["🧠 ML Helper", "🤖 ChatGPT Helper"])
 
-    if st.button("Get Smart Help"):
-        if model is None or vectorizer is None:
-            st.error("The AI model is not available at the moment.")
-        elif not help_text.strip():
-            st.warning("Please describe your issue first.")
-        else:
-            vec = vectorizer.transform([help_text])
-            prediction = model.predict(vec)[0]
-            if hasattr(model, "predict_proba"):
-                probas = model.predict_proba(vec)[0]
-                top_conf = probas[np.argmax(probas)]
+    # ---- ML Helper ----
+    with help_tabs[0]:
+        help_text_ml = st.text_area(
+            "Describe your IT issue (ML helper)",
+            height=120,
+            key="ai_help_text_ml",
+        )
+        if st.button("Get Smart Help (ML)", key="btn_ml_help"):
+            if model is None or vectorizer is None:
+                st.error("The AI model is not available at the moment.")
+            elif not help_text_ml.strip():
+                st.warning("Please describe your issue first.")
             else:
-                top_conf = 1.0 / len(model.classes_)
-            severity = compute_severity(help_text, prediction)
-            msg = generate_ai_help(help_text, prediction, severity)
-            st.markdown(msg)
+                vec = vectorizer.transform([help_text_ml])
+                prediction = model.predict(vec)[0]
+                if hasattr(model, "predict_proba"):
+                    probas = model.predict_proba(vec)[0]
+                    top_conf = probas[np.argmax(probas)]
+                else:
+                    top_conf = 1.0 / len(model.classes_)
+                severity = compute_severity(help_text_ml, prediction)
+                msg = generate_ai_help_ml(help_text_ml, prediction, severity)
+                st.markdown(msg)
+
+    # ---- ChatGPT Helper ----
+    with help_tabs[1]:
+        help_text_llm = st.text_area(
+            "Describe your IT issue (ChatGPT assistant)",
+            height=120,
+            key="ai_help_text_llm",
+        )
+        if st.button("Get Help from ChatGPT", key="btn_llm_help"):
+            if not help_text_llm.strip():
+                st.warning("Please describe your issue first.")
+            else:
+                reply = generate_ai_help_chatgpt(help_text_llm)
+                st.markdown(reply)
 
 tab_idx += 1
 
@@ -806,7 +859,6 @@ with tab_objects[tab_idx]:
                 vec = vectorizer.transform(df["ticket"].astype(str))
                 preds = model.predict(vec)
                 df["prediction"] = preds
-
                 df["severity"] = [
                     compute_severity(t, c)
                     for t, c in zip(df["ticket"].astype(str), df["prediction"])
