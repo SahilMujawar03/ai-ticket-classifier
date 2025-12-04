@@ -3,6 +3,8 @@ import datetime
 import time
 import smtplib
 from email.message import EmailMessage
+import sqlite3
+from contextlib import contextmanager
 
 import numpy as np
 import pandas as pd
@@ -21,18 +23,57 @@ st.set_page_config(
     layout="wide",
 )
 
-# ------------------------------------------------------
-# CONSTANTS / FILES
-# ------------------------------------------------------
-USERS_FILE = "users.csv"
-PREDICTION_LOG = "prediction_log.csv"
+# ======================================================
+# DATABASE SETUP (SQLite)
+# ======================================================
+DB_FILE = "app.db"
 
-# Auth / security constants
-SESSION_TIMEOUT_MINUTES = 30  # auto-logout after 30 minutes of inactivity
-MAX_LOGIN_ATTEMPTS = 5        # max wrong attempts before temporary lockout
-LOCKOUT_SECONDS = 300         # lockout duration in seconds (5 minutes)
 
-# Notification configuration (set via environment variables in production)
+@contextmanager
+def get_db():
+    conn = sqlite3.connect(DB_FILE)
+    conn.row_factory = sqlite3.Row
+    try:
+        yield conn
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def init_db():
+    """Create tables if they don't exist."""
+    with get_db() as db:
+        db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS users (
+                username TEXT PRIMARY KEY,
+                password TEXT NOT NULL,
+                role     TEXT NOT NULL
+            )
+            """
+        )
+        db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS tickets (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp TEXT NOT NULL,
+                ticket TEXT NOT NULL,
+                prediction TEXT,
+                confidence REAL,
+                severity TEXT,
+                user TEXT
+            )
+            """
+        )
+
+
+# ======================================================
+# CONSTANTS / ENV
+# ======================================================
+SESSION_TIMEOUT_MINUTES = 30
+MAX_LOGIN_ATTEMPTS = 5
+LOCKOUT_SECONDS = 300
+
 ENABLE_EMAIL_NOTIFICATIONS = True
 ENABLE_SLACK_NOTIFICATIONS = True
 
@@ -46,101 +87,106 @@ EMAIL_TO_IT = os.getenv("EMAIL_TO_IT", "")
 SLACK_WEBHOOK_URL = os.getenv("SLACK_WEBHOOK_URL", "")
 
 # ======================================================
-# USER MANAGEMENT (CSV-BASED AUTH)
+# PASSWORD / USER HELPERS
 # ======================================================
-
 def hash_password(plain: str) -> str:
-    """Hash a plain-text password using bcrypt."""
     return bcrypt.hashpw(plain.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
 
 
 def is_hashed_password(pwd: str) -> bool:
-    """Check if a password string looks like a bcrypt hash."""
-    return pwd.startswith("$2a$") or pwd.startswith("$2b$") or pwd.startswith("$2y$")
+    return isinstance(pwd, str) and pwd.startswith("$2")
 
 
 def verify_password(plain: str, hashed: str) -> bool:
-    """Verify a plain-text password against a stored hash.
-    Falls back to plain comparison if the stored value is not hashed
-    (for legacy, pre-migration rows).
-    """
     if not isinstance(hashed, str):
         return False
     try:
         if is_hashed_password(hashed):
             return bcrypt.checkpw(plain.encode("utf-8"), hashed.encode("utf-8"))
-        # Legacy / not-yet-migrated password
+        # legacy plain-text fallback
         return plain == hashed
     except Exception:
         return False
 
 
-def ensure_users_file():
-    """Create users.csv with one default admin user if it does not exist."""
-    if not os.path.exists(USERS_FILE):
-        df = pd.DataFrame(
-            [
-                ["admin", hash_password("sahil123"), "admin"],
-            ],
-            columns=["username", "password", "role"],
-        )
-        df.to_csv(USERS_FILE, index=False)
-
-
-def migrate_passwords_to_hashed(df: pd.DataFrame) -> pd.DataFrame:
-    """Ensure all passwords in the users DataFrame are stored as bcrypt hashes."""
-    changed = False
-    for idx, row in df.iterrows():
-        pwd = str(row.get("password", ""))
-        if pwd and not is_hashed_password(pwd):
-            df.at[idx, "password"] = hash_password(pwd)
-            changed = True
-
-    if changed:
-        df.to_csv(USERS_FILE, index=False)
-
-    return df
+def ensure_admin_user():
+    """Ensure at least one admin exists in the DB."""
+    with get_db() as db:
+        cur = db.execute("SELECT COUNT(*) AS c FROM users")
+        count = cur.fetchone()["c"]
+        if count == 0:
+            # default admin
+            admin_user = "admin"
+            admin_pass = "sahil123"
+            db.execute(
+                "INSERT INTO users (username, password, role) VALUES (?, ?, ?)",
+                (admin_user, hash_password(admin_pass), "admin"),
+            )
 
 
 def load_users() -> pd.DataFrame:
-    ensure_users_file()
-    df = pd.read_csv(USERS_FILE)
-    df = migrate_passwords_to_hashed(df)
+    with get_db() as db:
+        df = pd.read_sql_query("SELECT username, password, role FROM users", db)
     return df
 
 
-def save_users(df: pd.DataFrame) -> None:
-    df.to_csv(USERS_FILE, index=False)
-
-
 def authenticate(username: str, password: str):
-    """Return role if username/password match, else None."""
-    users = load_users()
-    row = users[users["username"] == username]
-    if row.empty:
-        return None
-
-    stored_pwd = str(row.iloc[0]["password"])
-    if verify_password(password, stored_pwd):
-        return row.iloc[0]["role"]
+    with get_db() as db:
+        cur = db.execute(
+            "SELECT username, password, role FROM users WHERE username = ?",
+            (username,),
+        )
+        row = cur.fetchone()
+    if row and verify_password(password, row["password"]):
+        return row["role"]
     return None
 
 
 def change_password(username: str, old_pass: str, new_pass: str) -> bool:
-    """Change password for a user if old password is correct."""
-    users = load_users()
-    row = users[users["username"] == username]
-    if row.empty:
-        return False
-
-    stored_pwd = str(row.iloc[0]["password"])
-    if not verify_password(old_pass, stored_pwd):
-        return False
-
-    users.loc[users["username"] == username, "password"] = hash_password(new_pass)
-    save_users(users)
+    with get_db() as db:
+        cur = db.execute(
+            "SELECT password FROM users WHERE username = ?",
+            (username,),
+        )
+        row = cur.fetchone()
+        if not row or not verify_password(old_pass, row["password"]):
+            return False
+        new_hash = hash_password(new_pass)
+        db.execute(
+            "UPDATE users SET password = ? WHERE username = ?",
+            (new_hash, username),
+        )
     return True
 
+
+def create_user(username: str, password: str, role: str) -> bool:
+    try:
+        with get_db() as db:
+            db.execute(
+                "INSERT INTO users (username, password, role) VALUES (?, ?, ?)",
+                (username, hash_password(password), role),
+            )
+        return True
+    except sqlite3.IntegrityError:
+        return False
+
+
+def reset_user_password(username: str, new_pass: str) -> None:
+    with get_db() as db:
+        db.execute(
+            "UPDATE users SET password = ? WHERE username = ?",
+            (hash_password(new_pass), username),
+        )
+
+
+def delete_user(username: str) -> None:
+    with get_db() as db:
+        db.execute("DELETE FROM users WHERE username = ?", (username,))
+
+
+# Initialize DB and admin
+init_db()
+ensure_admin_user()
 
 # ======================================================
 # SESSION AUTH STATE
@@ -154,30 +200,24 @@ if "auth" not in st.session_state:
         "last_active": None,
     }
 
-# Track login attempts for simple brute-force protection
 if "login_security" not in st.session_state:
-    st.session_state["login_security"] = {
-        "attempts": 0,
-        "locked_until": None,
-    }
+    st.session_state["login_security"] = {"attempts": 0, "locked_until": None}
 
 
 def check_session_timeout():
-    """Auto-logout users after a period of inactivity."""
     auth = st.session_state.get("auth", {})
     if not auth.get("logged_in"):
         return
-
     last_active = auth.get("last_active")
     if not last_active:
         return
-
     try:
         last_dt = datetime.datetime.fromisoformat(last_active)
     except Exception:
         return
-
-    if datetime.datetime.now() - last_dt > datetime.timedelta(minutes=SESSION_TIMEOUT_MINUTES):
+    if datetime.datetime.now() - last_dt > datetime.timedelta(
+        minutes=SESSION_TIMEOUT_MINUTES
+    ):
         st.session_state["auth"] = {
             "logged_in": False,
             "username": None,
@@ -189,7 +229,7 @@ def check_session_timeout():
 
 
 # ======================================================
-# LOGIN SCREEN
+# LOGIN UI
 # ======================================================
 def login_screen():
     st.markdown(
@@ -197,28 +237,26 @@ def login_screen():
         unsafe_allow_html=True,
     )
     st.write("")
-
-    security = st.session_state.get("login_security", {"attempts": 0, "locked_until": None})
+    security = st.session_state.get(
+        "login_security", {"attempts": 0, "locked_until": None}
+    )
     now_ts = time.time()
     locked_until = security.get("locked_until")
-
     if locked_until and now_ts < locked_until:
         remaining = int(locked_until - now_ts)
         minutes = remaining // 60
         seconds = remaining % 60
         st.error(
-            f"Too many failed login attempts. Please try again in "
-            f"{minutes}m {seconds}s."
+            f"Too many failed login attempts. Please try again in {minutes}m {seconds}s."
         )
         return
 
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
-        username = st.text_input("Username")
-        password = st.text_input("Password", type="password")
-
+        username_input = st.text_input("Username")
+        password_input = st.text_input("Password", type="password")
         if st.button("Login", use_container_width=True):
-            role = authenticate(username, password)
+            role = authenticate(username_input, password_input)
             if role:
                 st.session_state["login_security"] = {
                     "attempts": 0,
@@ -226,15 +264,18 @@ def login_screen():
                 }
                 st.session_state["auth"] = {
                     "logged_in": True,
-                    "username": username,
+                    "username": username_input,
                     "role": role,
-                    "login_time": datetime.datetime.now().isoformat(timespec="seconds"),
-                    "last_active": datetime.datetime.now().isoformat(timespec="seconds"),
+                    "login_time": datetime.datetime.now().isoformat(
+                        timespec="seconds"
+                    ),
+                    "last_active": datetime.datetime.now().isoformat(
+                        timespec="seconds"
+                    ),
                 }
-                st.success(f"Welcome, **{username}** ({role})!")
+                st.success(f"Welcome, **{username_input}** ({role})!")
                 st.rerun()
             else:
-                security = st.session_state.get("login_security", {"attempts": 0, "locked_until": None})
                 attempts = int(security.get("attempts", 0)) + 1
                 if attempts >= MAX_LOGIN_ATTEMPTS:
                     st.session_state["login_security"] = {
@@ -253,17 +294,18 @@ def login_screen():
 
 
 check_session_timeout()
-
 if not st.session_state["auth"]["logged_in"]:
     login_screen()
     st.stop()
 
-st.session_state["auth"]["last_active"] = datetime.datetime.now().isoformat(timespec="seconds")
+st.session_state["auth"]["last_active"] = datetime.datetime.now().isoformat(
+    timespec="seconds"
+)
 
 username = st.session_state["auth"]["username"]
 role = st.session_state["auth"]["role"]
-can_bulk = role in ("admin", "engineer")
 is_admin = role == "admin"
+can_bulk = role in ("admin", "engineer")
 
 # ======================================================
 # STYLING
@@ -301,13 +343,11 @@ st.markdown(
 st.markdown('<div class="big-title">🧠 AI Ticket Classifier</div>', unsafe_allow_html=True)
 st.markdown(
     '<div class="sub-header">Smart classification of IT support tickets for '
-    'Active Directory, Network, Hardware, Email, Firewall, MDM, Printer & Security issues.</div>',
+    "Active Directory, Network, Hardware, Email, Firewall, MDM, Printer & Security issues.</div>",
     unsafe_allow_html=True,
 )
 
-# ======================================================
-# ANIMATION
-# ======================================================
+
 def load_lottie(url: str):
     try:
         r = requests.get(url)
@@ -320,13 +360,11 @@ def load_lottie(url: str):
 
 lottie_url = "https://assets2.lottiefiles.com/packages/lf20_kyu7xb1v.json"
 lottie_ai = load_lottie(lottie_url)
-
 if lottie_ai:
-    st_lottie = st_lottie
     st_lottie(lottie_ai, height=220, key="hero_animation")
 
 # ======================================================
-# LOAD MODEL / VECTORIZER
+# MODEL / VECTORIZER
 # ======================================================
 @st.cache_resource
 def load_artifacts():
@@ -341,7 +379,7 @@ def load_artifacts():
 model, vectorizer, model_error = load_artifacts()
 
 # ======================================================
-# UTILITY FUNCTIONS
+# TICKET / LOGIC UTILITIES
 # ======================================================
 def simple_summary(text: str, max_words: int = 18) -> str:
     words = text.split()
@@ -359,40 +397,43 @@ def suggest_fix(category: str) -> str:
         "Printer Issue": "Check printer network status, reinstall drivers, clear queue, verify IP.",
         "Security Issue": "Run AV scan, isolate device if needed, reset credentials, review logs.",
     }
-    return suggestions.get(category, "No predefined suggestion available for this category yet.")
+    return suggestions.get(
+        category, "No predefined suggestion available for this category yet."
+    )
 
 
 def compute_severity(ticket: str, category: str) -> str:
     text = ticket.lower()
-
-    if any(k in text for k in ["all users", "server down", "data breach", "cannot access", "production down"]):
+    if any(
+        k in text
+        for k in ["all users", "server down", "data breach", "cannot access", "production down"]
+    ):
         return "Critical"
-
-    if any(k in text for k in ["can't login", "cant login", "urgent", "very slow", "vpn disconnecting"]):
+    if any(
+        k in text for k in ["can't login", "cant login", "urgent", "very slow", "vpn disconnecting"]
+    ):
         return "High"
-
     if any(k in text for k in ["sometimes", "intermittent", "some users"]):
         return "Medium"
-
     return "Low"
 
 
 def log_prediction(ticket, prediction, confidence, severity):
-    row = {
-        "timestamp": datetime.datetime.now().isoformat(timespec="seconds"),
-        "ticket": ticket,
-        "prediction": prediction,
-        "confidence": round(float(confidence), 4),
-        "severity": severity,
-        "user": username,
-    }
-    df = pd.DataFrame([row])
-    df.to_csv(
-        PREDICTION_LOG,
-        mode="a",
-        header=not os.path.exists(PREDICTION_LOG),
-        index=False,
-    )
+    with get_db() as db:
+        db.execute(
+            """
+            INSERT INTO tickets (timestamp, ticket, prediction, confidence, severity, user)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                datetime.datetime.now().isoformat(timespec="seconds"),
+                ticket,
+                prediction,
+                float(confidence),
+                severity,
+                username,
+            ),
+        )
 
 
 def generate_user_email(ticket, category, severity):
@@ -400,8 +441,8 @@ def generate_user_email(ticket, category, severity):
         f"Subject: Your Support Ticket Update ({category})\n\n"
         f"Hi,\n\n"
         f"Your issue has been classified as {category} with severity {severity}.\n"
-        f"Ticket: \"{ticket}\"\n\n"
-        f"Our IT team is working on it and will update you soon.\n"
+        f'Ticket: "{ticket}"\n\n'
+        "Our IT team is working on it and will update you soon.\n"
     )
 
 
@@ -421,22 +462,20 @@ def jaccard_similarity(a: str, b: str) -> float:
 
 
 def find_similar_tickets(current_ticket: str, top_n: int = 3):
-    if not os.path.exists(PREDICTION_LOG):
+    with get_db() as db:
+        df = pd.read_sql_query("SELECT * FROM tickets", db)
+    if df.empty or "ticket" not in df.columns:
         return None
-    hist_df = pd.read_csv(PREDICTION_LOG)
-    if "ticket" not in hist_df.columns:
-        return None
-
-    hist_df["similarity"] = hist_df["ticket"].astype(str).apply(
+    df["similarity"] = df["ticket"].astype(str).apply(
         lambda t: jaccard_similarity(current_ticket, t)
     )
-    hist_df = hist_df.sort_values("similarity", ascending=False)
-    hist_df = hist_df[hist_df["similarity"] > 0]
-    return hist_df.head(top_n) if not hist_df.empty else None
+    df = df.sort_values("similarity", ascending=False)
+    df = df[df["similarity"] > 0]
+    return df.head(top_n) if not df.empty else None
 
 
 # ======================================================
-# NOTIFICATION HELPERS (EMAIL + SLACK)
+# NOTIFICATIONS (EMAIL + SLACK)
 # ======================================================
 def send_email_notification(subject: str, body: str, to_address: str = None):
     if not ENABLE_EMAIL_NOTIFICATIONS:
@@ -514,62 +553,70 @@ def notify_critical_or_high(ticket: str, category: str, severity: str, confidenc
 
 
 # ======================================================
-# "AI HELP ASSISTANT" LOGIC
+# AI HELP ASSISTANT
 # ======================================================
 def generate_ai_help(ticket_text: str, category: str, severity: str) -> str:
-    """Return a more detailed, friendly help message for employees."""
     text = ticket_text.lower()
     base_fix = suggest_fix(category)
-
     extra = []
 
     if "printer" in text:
-        extra.extend([
-            "- Make sure the printer is powered on and connected to Wi-Fi/LAN.",
-            "- Open **Devices & Printers** and check if the printer shows as *Online*.",
-            "- Try removing the printer and adding it again.",
-        ])
+        extra.extend(
+            [
+                "- Make sure the printer is powered on and connected to Wi-Fi/LAN.",
+                "- Open **Devices & Printers** and check if the printer shows as *Online*.",
+                "- Try removing the printer and adding it again.",
+            ]
+        )
     if "vpn" in text:
-        extra.extend([
-            "- Confirm your internet works without VPN.",
-            "- Check VPN username/password are correct.",
-            "- Try disconnect → reconnect, or restart the VPN client.",
-        ])
+        extra.extend(
+            [
+                "- Confirm your internet works without VPN.",
+                "- Check VPN username/password are correct.",
+                "- Try disconnect → reconnect, or restart the VPN client.",
+            ]
+        )
     if "wifi" in text or "wi-fi" in text:
-        extra.extend([
-            "- Check if other devices can join the same Wi-Fi.",
-            "- Forget the network and reconnect.",
-            "- Move closer to the router or access point.",
-        ])
+        extra.extend(
+            [
+                "- Check if other devices can join the same Wi-Fi.",
+                "- Forget the network and reconnect.",
+                "- Move closer to the router or access point.",
+            ]
+        )
     if "outlook" in text or "email" in text:
-        extra.extend([
-            "- Close and reopen Outlook.",
-            "- Check if mailbox is full.",
-            "- Try sending a test email to yourself.",
-        ])
+        extra.extend(
+            [
+                "- Close and reopen Outlook.",
+                "- Check if mailbox is full.",
+                "- Try sending a test email to yourself.",
+            ]
+        )
     if "slow" in text or "performance" in text:
-        extra.extend([
-            "- Close unused apps and browser tabs.",
-            "- Restart the device if it hasn’t been restarted recently.",
-            "- Check Task Manager for apps using high CPU or RAM.",
-        ])
+        extra.extend(
+            [
+                "- Close unused apps and browser tabs.",
+                "- Restart the device if it hasn’t been restarted recently.",
+                "- Check Task Manager for apps using high CPU or RAM.",
+            ]
+        )
 
     tips = [f"- {base_fix}"] + extra if base_fix else extra
     tips_str = "\n".join(dict.fromkeys(tips))  # remove duplicates
 
     message = (
-        f"### 🤖 Smart Help Summary\n"
+        "### 🤖 Smart Help Summary\n"
         f"- Predicted area: **{category}**\n"
         f"- Estimated severity: **{severity}**\n\n"
-        f"### ✅ Suggested steps\n"
+        "### ✅ Suggested steps\n"
         f"{tips_str or '- No specific suggestions yet. Please contact IT support.'}\n\n"
-        f"If these steps don’t solve your issue, please raise a ticket so the IT team can help you further."
+        "If these steps don’t solve your issue, please raise a ticket so the IT team can help you further."
     )
     return message
 
 
 # ======================================================
-# SIDEBAR MENU
+# SIDEBAR
 # ======================================================
 with st.sidebar:
     st.header("⚙️ Menu")
@@ -621,17 +668,15 @@ with st.sidebar:
     )
 
 # ======================================================
-# MAIN TABS
+# TABS
 # ======================================================
 tabs = ["📝 Single Ticket", "🤖 AI Help Assistant", "📂 Bulk CSV"]
 if is_admin:
     tabs.append("👥 User Management")
-if os.path.exists(PREDICTION_LOG):
-    tabs.append("👤 User Insights")
-    tabs.append("📊 History")
+tabs.append("👤 User Insights")
+tabs.append("📊 History")
 
 tab_objects = st.tabs(tabs)
-
 tab_idx = 0
 
 # ------------------------------------------------------
@@ -673,7 +718,7 @@ with tab_objects[tab_idx]:
 
             st.markdown(
                 f'<div class="prediction-box">Predicted Category: '
-                f'<b>{prediction}</b></div>',
+                f"<b>{prediction}</b></div>",
                 unsafe_allow_html=True,
             )
 
@@ -732,7 +777,6 @@ with tab_objects[tab_idx]:
                 top_conf = probas[np.argmax(probas)]
             else:
                 top_conf = 1.0 / len(model.classes_)
-
             severity = compute_severity(help_text, prediction)
             msg = generate_ai_help(help_text, prediction, severity)
             st.markdown(msg)
@@ -762,8 +806,10 @@ with tab_objects[tab_idx]:
                 vec = vectorizer.transform(df["ticket"].astype(str))
                 preds = model.predict(vec)
                 df["prediction"] = preds
+
                 df["severity"] = [
-                    compute_severity(t, c) for t, c in zip(df["ticket"].astype(str), df["prediction"])
+                    compute_severity(t, c)
+                    for t, c in zip(df["ticket"].astype(str), df["prediction"])
                 ]
 
                 st.dataframe(df)
@@ -781,12 +827,14 @@ tab_idx += 1
 # ------------------------------------------------------
 # 4) User Management (admin only)
 # ------------------------------------------------------
-if is_admin:
-    with tab_objects[tab_idx]:
+with tab_objects[tab_idx]:
+    if not is_admin:
+        st.warning("Only admin users can manage accounts.")
+    else:
         st.subheader("User Management (Admin only)")
 
-        users = load_users()
-        st.dataframe(users, use_container_width=True)
+        users_df = load_users()
+        st.dataframe(users_df, use_container_width=True)
 
         st.markdown("### ➕ Add new user")
         new_user = st.text_input("New username")
@@ -796,56 +844,61 @@ if is_admin:
         if st.button("Create user"):
             if not new_user or not new_pass:
                 st.warning("Username and password cannot be empty.")
-            elif new_user in users["username"].values:
-                st.error("User already exists.")
             else:
-                hashed_pw = hash_password(new_pass)
-                new_row = pd.DataFrame(
-                    {"username": [new_user], "password": [hashed_pw], "role": [new_role]}
-                )
-                save_users(pd.concat([users, new_row], ignore_index=True))
-                st.success("User created.")
-                st.rerun()
+                created = create_user(new_user, new_pass, new_role)
+                if created:
+                    st.success("User created.")
+                    st.experimental_rerun()
+                else:
+                    st.error("User already exists.")
 
         st.markdown("### 🔁 Reset user password")
-        reset_user = st.selectbox("Select user to reset", users["username"], key="reset_user_sel")
-        reset_new_pw = st.text_input(
-            "New password for selected user", type="password", key="reset_new_pw"
-        )
-        if st.button("Reset password for user"):
-            if not reset_new_pw:
-                st.warning("Please enter a new password.")
-            else:
-                users.loc[users["username"] == reset_user, "password"] = hash_password(reset_new_pw)
-                save_users(users)
-                st.success(f"Password reset for user '{reset_user}'.")
-                st.rerun()
+        if not users_df.empty:
+            reset_user_name = st.selectbox(
+                "Select user to reset", users_df["username"], key="reset_user_sel"
+            )
+            reset_new_pw = st.text_input(
+                "New password for selected user", type="password", key="reset_new_pw"
+            )
+            if st.button("Reset password for user"):
+                if not reset_new_pw:
+                    st.warning("Please enter a new password.")
+                else:
+                    reset_user_password(reset_user_name, reset_new_pw)
+                    st.success(f"Password reset for user '{reset_user_name}'.")
+                    st.experimental_rerun()
 
         st.markdown("### 🗑 Delete user")
-        del_user = st.selectbox("Select user to delete", users["username"], key="del_user_sel")
-        if st.button("Delete user"):
-            if del_user == "admin":
-                st.error("You cannot delete the main admin account.")
-            else:
-                users = users[users["username"] != del_user]
-                save_users(users)
-                st.success("User deleted.")
-                st.rerun()
+        if not users_df.empty:
+            del_user_name = st.selectbox(
+                "Select user to delete", users_df["username"], key="del_user_sel"
+            )
+            if st.button("Delete user"):
+                if del_user_name == "admin":
+                    st.error("You cannot delete the main admin account.")
+                else:
+                    delete_user(del_user_name)
+                    st.success("User deleted.")
+                    st.experimental_rerun()
 
-    tab_idx += 1
+tab_idx += 1
 
 # ------------------------------------------------------
-# 5) User Insights (if log exists)
+# 5) User Insights
 # ------------------------------------------------------
-if os.path.exists(PREDICTION_LOG):
-    with tab_objects[tab_idx]:
-        st.subheader("User Insights")
+with tab_objects[tab_idx]:
+    st.subheader("User Insights")
 
-        hist = pd.read_csv(PREDICTION_LOG)
-        if hist.empty:
-            st.info("No prediction history yet.")
+    with get_db() as db:
+        hist = pd.read_sql_query("SELECT * FROM tickets", db)
+
+    if hist.empty:
+        st.info("No prediction history yet.")
+    else:
+        users_list = sorted(hist["user"].dropna().unique().tolist())
+        if not users_list:
+            st.info("No user information stored with tickets yet.")
         else:
-            users_list = sorted(hist["user"].dropna().unique().tolist())
             selected_user = st.selectbox("Select a user", users_list)
 
             user_hist = hist[hist["user"] == selected_user]
@@ -882,13 +935,59 @@ if os.path.exists(PREDICTION_LOG):
             else:
                 st.dataframe(repeated)
 
-    tab_idx += 1
+tab_idx += 1
 
 # ------------------------------------------------------
-# 6) History tab (if log exists)
+# 6) History + Dashboard
 # ------------------------------------------------------
-if os.path.exists(PREDICTION_LOG):
-    with tab_objects[tab_idx]:
-        st.subheader("Prediction history")
-        hist = pd.read_csv(PREDICTION_LOG)
+with tab_objects[tab_idx]:
+    st.subheader("📊 Prediction history & dashboard")
+
+    with get_db() as db:
+        hist = pd.read_sql_query("SELECT * FROM tickets", db)
+
+    if hist.empty:
+        st.info("No prediction history yet.")
+    else:
+        total_tickets = len(hist)
+        avg_conf = (
+            float(hist["confidence"].mean()) if "confidence" in hist.columns else 0.0
+        )
+        critical_count = (
+            int((hist["severity"] == "Critical").sum())
+            if "severity" in hist.columns
+            else 0
+        )
+
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("Total tickets", total_tickets)
+        with col2:
+            st.metric("Avg confidence", f"{avg_conf * 100:.1f}%")
+        with col3:
+            st.metric("Critical tickets", critical_count)
+
+        st.markdown("### Tickets by category")
+        if "prediction" in hist.columns:
+            cat_counts = hist["prediction"].value_counts().to_frame(name="count")
+            st.bar_chart(cat_counts)
+        else:
+            st.info("No 'prediction' column found in history.")
+
+        st.markdown("### Tickets by severity")
+        if "severity" in hist.columns:
+            sev_counts = hist["severity"].value_counts().to_frame(name="count")
+            st.bar_chart(sev_counts)
+        else:
+            st.info("No 'severity' column found in history.")
+
+        st.markdown("### Tickets over time")
+        if "timestamp" in hist.columns:
+            dates = hist["timestamp"].astype(str).str.slice(0, 10)
+            date_counts = dates.value_counts().sort_index().to_frame(name="count")
+            st.line_chart(date_counts)
+        else:
+            st.info("No 'timestamp' column found in history.")
+
+        st.markdown("### Raw history table")
         st.dataframe(hist, use_container_width=True)
