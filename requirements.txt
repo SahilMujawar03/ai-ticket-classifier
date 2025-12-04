@@ -6,3 +6,4 @@ bcrypt
 requests
 streamlit-lottie
 scikit-learn
+openai
